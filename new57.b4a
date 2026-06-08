@@ -1,0 +1,682 @@
+﻿Build1=Default,cnc.controller2
+Group=Default Group
+Library1=b4xpreferencesdialog
+Library2=core
+Library3=phone
+Library4=xui
+ManifestCode='This code will be applied to the manifest file during compilation.~\n~'You do not need to modify it in most cases.~\n~'See this link for for more information: https://www.b4x.com/forum/showthread.php?p=78136~\n~AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~'End of default text.~\n~
+Module1=SettingsScreen
+Module2=Starter
+NumberOfFiles=0
+NumberOfLibraries=4
+NumberOfModules=2
+Version=13.5
+@EndOfDesignText@
+#Region  Project Attributes 
+	#ApplicationLabel: CNC Controller2
+	#VersionCode: 1
+	#VersionName: 
+	'SupportedOrientations possible values: unspecified, landscape or portrait.
+	#SupportedOrientations: landscape
+	#CanInstallToExternalStorage: False
+#End Region
+
+#Region  Activity Attributes 
+	#FullScreen: False
+	#IncludeTitle: False
+#End Region
+
+Sub Process_Globals
+	Private tmrBlink As Timer
+	Private xui As XUI
+	Private viewerCC As ContentChooser   ' ADD THIS LINE
+End Sub
+
+Sub Globals
+	' Top bar
+	Private pnlTopBar As Panel
+	Private lblStatus, lblTitle, lblDateTime As Label
+    
+	' Left Main Panel
+	Private pnlLeftMain As Panel
+	Private lblCols(3) As Label
+	Private btnAxis(5) As Button
+	Private lblWorkVals(5), lblMachVals(5) As Label
+	Private btnStart, btnPause, btnReset As Button
+    
+	' G-Code Terminal
+	Private pnlTerminal As Panel
+	Private txtGCodeDisplay As EditText
+    
+	' Right Main Panel (3D Viewer)
+	Private pnlRightMain As Panel
+	Private pnl3DPlaceholder As Panel
+	Private lbl3DStats As Label
+    
+	' Control Grid Buttons
+	Private btnSpindleCW, btnSpindleStop, btnSpindleCCW As Button
+	Private txtSpindleSpeed As EditText
+	Private btnSingleBlock, btnCoolant, btnGotoZero As Button
+	Private btnOverride, btnMDI, btnJog, btnMore As Button
+    
+	' Bottom Navigation Bar
+	Private pnlBottomNav As Panel
+	Private btnNav(6) As Button
+	
+	Private ButtonStates As Map
+	Private IsBlinkActiveState As Boolean = False
+	
+	' 3D Viewer variables
+	Private viewerCanvas As B4XCanvas
+	Private viewerPoints As List
+	Private viewerMinX, viewerMaxX, viewerMinY, viewerMaxY As Float
+	Private viewerAngleX As Float = 0.5
+	Private viewerAngleZ As Float = 0.785
+	Private viewerStartX, viewerStartY As Float
+	Private viewerStartAngleX, viewerStartAngleZ As Float
+	'Private viewerCC As ContentChooser
+End Sub
+
+Sub Activity_Create(FirstTime As Boolean)
+	ButtonStates.Initialize
+	tmrBlink.Initialize("tmrBlink", 500)
+	Activity.Color = Colors.RGB(45, 45, 45)
+	
+	' ===== TOP BAR =====
+	pnlTopBar.Initialize("")
+	pnlTopBar.Color = Colors.RGB(60, 60, 60)
+	Activity.AddView(pnlTopBar, 0, 0, 100%x, 35dip)
+	
+	lblStatus.Initialize("")
+	lblStatus.Text = "Ready"
+	lblStatus.TextColor = Colors.Black
+	lblStatus.Color = Colors.RGB(0, 180, 216)
+	lblStatus.Gravity = Gravity.CENTER
+	pnlTopBar.AddView(lblStatus, 0, 0, 15%x, 35dip)
+	
+	lblTitle.Initialize("")
+	lblTitle.Text = "TEST.nc"
+	lblTitle.TextColor = Colors.White
+	lblTitle.Gravity = Gravity.CENTER
+	pnlTopBar.AddView(lblTitle, 15%x, 0, 55%x, 35dip)
+	
+	lblDateTime.Initialize("")
+	lblDateTime.Text = DateTime.Date(DateTime.Now) & " " & DateTime.Time(DateTime.Now)
+	lblDateTime.TextColor = Colors.LightGray
+	lblDateTime.Gravity = Gravity.CENTER_VERTICAL + Gravity.RIGHT
+	pnlTopBar.AddView(lblDateTime, 70%x, 0, 28%x, 35dip)
+	
+	Dim mainTop As Int = 35dip
+	Dim mainHeight As Int = 100%y - 80dip
+	
+	' ===== LEFT PANEL =====
+	pnlLeftMain.Initialize("")
+	pnlLeftMain.Color = Colors.Transparent
+	Activity.AddView(pnlLeftMain, 0, mainTop, 46%x, mainHeight)
+	
+	' Column Headers
+	Dim colW As Int = pnlLeftMain.Width / 3
+	Dim headers() As String = Array As String("Zero", "Work co.", "Machine co.")
+	For i = 0 To 2
+		lblCols(i).Initialize("")
+		lblCols(i).Text = headers(i)
+		lblCols(i).TextColor = Colors.LightGray
+		lblCols(i).TextSize = 14
+		lblCols(i).Gravity = Gravity.CENTER
+		pnlLeftMain.AddView(lblCols(i), i * colW, 5dip, colW, 25dip)
+	Next
+	
+	' Axis Information Grid
+	Dim axisNames() As String = Array As String("X", "Y", "Z", "A", "B")
+	Dim rowH As Int = 38dip
+	Dim rowSpacing As Int = 5dip
+	Dim startY As Int = 30dip
+	
+	For i = 0 To 4
+		Dim currentY As Int = startY + i * (rowH + rowSpacing)
+		btnAxis(i).Initialize("Axis")
+		btnAxis(i).Text = axisNames(i)
+		btnAxis(i).TextColor = Colors.White
+		btnAxis(i).Color = Colors.RGB(40, 167, 69)
+		pnlLeftMain.AddView(btnAxis(i), 10dip, currentY, colW - 20dip, rowH)
+		
+		lblWorkVals(i).Initialize("")
+		lblWorkVals(i).Text = "0.000"
+		lblWorkVals(i).TextColor = Colors.White
+		lblWorkVals(i).TextSize = 18
+		lblWorkVals(i).Gravity = Gravity.CENTER
+		pnlLeftMain.AddView(lblWorkVals(i), colW, currentY, colW, rowH)
+		
+		lblMachVals(i).Initialize("")
+		lblMachVals(i).Text = "0.000"
+		lblMachVals(i).TextColor = Colors.White
+		lblMachVals(i).TextSize = 18
+		lblMachVals(i).Gravity = Gravity.CENTER
+		pnlLeftMain.AddView(lblMachVals(i), colW * 2, currentY, colW, rowH)
+	Next
+	
+	' Action Buttons
+	Dim btnY As Int = startY + 5 * (rowH + rowSpacing) + 10dip
+	Dim btnW As Int = (pnlLeftMain.Width - 40dip) / 3
+	Dim btnH As Int = 45dip
+	
+	btnStart.Initialize("Start")
+	btnStart.Text = "Start"
+	btnStart.Color = Colors.RGB(40, 167, 69)
+	btnStart.TextColor = Colors.White
+	btnStart.TextSize = 14
+	pnlLeftMain.AddView(btnStart, 10dip, btnY, btnW, btnH)
+	
+	btnPause.Initialize("Pause")
+	btnPause.Text = "Pause"
+	btnPause.Color = Colors.RGB(220, 53, 69)
+	btnPause.TextColor = Colors.White
+	btnPause.TextSize = 14
+	pnlLeftMain.AddView(btnPause, 20dip + btnW, btnY, btnW, btnH)
+	
+	btnReset.Initialize("Reset")
+	btnReset.Text = "Reset"
+	btnReset.Color = Colors.RGB(255, 193, 7)
+	btnReset.TextColor = Colors.Black
+	btnReset.TextSize = 14
+	pnlLeftMain.AddView(btnReset, 30dip + (btnW * 2), btnY, btnW, btnH)
+	
+	' G-Code Terminal
+	Dim termY As Int = btnY + btnH + 10dip
+	Dim termH As Int = pnlLeftMain.Height - termY - 5dip
+	pnlTerminal.Initialize("")
+	pnlTerminal.Color = Colors.RGB(30, 30, 30)
+	pnlLeftMain.AddView(pnlTerminal, 10dip, termY, pnlLeftMain.Width - 20dip, termH)
+	
+	txtGCodeDisplay.Initialize("")
+	txtGCodeDisplay.Color = Colors.Transparent
+	txtGCodeDisplay.TextColor = Colors.RGB(40, 167, 69)
+	txtGCodeDisplay.TextSize = 12
+	txtGCodeDisplay.SingleLine = False
+	txtGCodeDisplay.Wrap = True
+	txtGCodeDisplay.Enabled = False
+	txtGCodeDisplay.Text = "1: %" & CRLF & "2: ( Machine Name: CNC )" & CRLF & "3: ( Tu Hao: _model23.prt )" & CRLF & "4: ( BianCheng: Administrator )"
+	pnlTerminal.AddView(txtGCodeDisplay, 5dip, 5dip, pnlTerminal.Width - 10dip, pnlTerminal.Height - 10dip)
+	
+	' ===== RIGHT PANEL =====
+	pnlRightMain.Initialize("")
+	pnlRightMain.Color = Colors.Transparent
+	Activity.AddView(pnlRightMain, 46%x, mainTop, 54%x, mainHeight)
+	
+	' 3D Viewer
+	Dim viewH As Int = pnlRightMain.Height * 0.55
+	pnl3DPlaceholder.Initialize("")
+	pnl3DPlaceholder.Color = Colors.RGB(20, 20, 20)
+	pnlRightMain.AddView(pnl3DPlaceholder, 5dip, 5dip, pnlRightMain.Width - 10dip, viewH)
+	
+	lbl3DStats.Initialize("")
+	lbl3DStats.Text = "X: -11.060 ... 8.773" & CRLF & "Y: -8.035 ... 8.035" & CRLF & "Z: 0.000 ... 16.000"
+	lbl3DStats.TextColor = Colors.RGB(0, 180, 216)
+	lbl3DStats.TextSize = 12
+	pnl3DPlaceholder.AddView(lbl3DStats, 10dip, viewH - 60dip, 200dip, 55dip)
+	
+	' Grid Buttons
+	Dim gridTop As Int = viewH + 10dip
+	Dim gridW As Int = (pnlRightMain.Width - 25dip) / 4
+	Dim gridH_btn As Int = (pnlRightMain.Height - gridTop - 10dip) / 3
+	Dim gSpace As Int = 5dip
+	
+	' Row 1
+	btnSpindleCW.Initialize("SpindleCW")
+	btnSpindleCW.Text = "Spindle CW"
+	btnSpindleCW.Color = Colors.RGB(64, 64, 64)
+	btnSpindleCW.TextColor = Colors.White
+	btnSpindleCW.TextSize = 12
+	pnlRightMain.AddView(btnSpindleCW, 5dip, gridTop, gridW, gridH_btn)
+	
+	btnSpindleStop.Initialize("SpindleStop")
+	btnSpindleStop.Text = "Spindle Stop"
+	btnSpindleStop.Color = Colors.RGB(64, 64, 64)
+	btnSpindleStop.TextColor = Colors.White
+	btnSpindleStop.TextSize = 12
+	pnlRightMain.AddView(btnSpindleStop, 5dip + (gridW + gSpace), gridTop, gridW, gridH_btn)
+	
+	btnSpindleCCW.Initialize("SpindleCCW")
+	btnSpindleCCW.Text = "Spindle CCW"
+	btnSpindleCCW.Color = Colors.RGB(64, 64, 64)
+	btnSpindleCCW.TextColor = Colors.White
+	btnSpindleCCW.TextSize = 12
+	pnlRightMain.AddView(btnSpindleCCW, 5dip + (gridW + gSpace) * 2, gridTop, gridW, gridH_btn)
+	
+	txtSpindleSpeed.Initialize("")
+	txtSpindleSpeed.Text = "3500"
+	txtSpindleSpeed.Gravity = Gravity.CENTER
+	txtSpindleSpeed.TextColor = Colors.Black
+	txtSpindleSpeed.Color = Colors.White
+	pnlRightMain.AddView(txtSpindleSpeed, 5dip + (gridW + gSpace) * 3, gridTop, gridW, gridH_btn)
+	
+	' Row 2
+	Dim r2Top As Int = gridTop + gridH_btn + gSpace
+	btnSingleBlock.Initialize("SingleBlock")
+	btnSingleBlock.Text = "Single Block"
+	btnSingleBlock.Color = Colors.RGB(64, 64, 64)
+	btnSingleBlock.TextColor = Colors.White
+	btnSingleBlock.TextSize = 12
+	pnlRightMain.AddView(btnSingleBlock, 5dip, r2Top, gridW, gridH_btn)
+	
+	btnCoolant.Initialize("Coolant")
+	btnCoolant.Text = "Coolant"
+	btnCoolant.Color = Colors.RGB(64, 64, 64)
+	btnCoolant.TextColor = Colors.White
+	btnCoolant.TextSize = 12
+	pnlRightMain.AddView(btnCoolant, 5dip + (gridW + gSpace), r2Top, gridW, gridH_btn)
+	
+	btnGotoZero.Initialize("GotoZero")
+	btnGotoZero.Text = "GOTO Zero"
+	btnGotoZero.Color = Colors.RGB(64, 64, 64)
+	btnGotoZero.TextColor = Colors.White
+	btnGotoZero.TextSize = 12
+	pnlRightMain.AddView(btnGotoZero, 5dip + (gridW + gSpace) * 2, r2Top, gridW, gridH_btn)
+	
+	' Row 3
+	Dim r3Top As Int = r2Top + gridH_btn + gSpace
+	btnOverride.Initialize("Override")
+	btnOverride.Text = "Override"
+	btnOverride.Color = Colors.RGB(64, 64, 64)
+	btnOverride.TextColor = Colors.White
+	btnOverride.TextSize = 12
+	pnlRightMain.AddView(btnOverride, 5dip, r3Top, gridW, gridH_btn)
+	
+	btnMDI.Initialize("MDI")
+	btnMDI.Text = "MDI"
+	btnMDI.Color = Colors.RGB(64, 64, 64)
+	btnMDI.TextColor = Colors.White
+	btnMDI.TextSize = 12
+	pnlRightMain.AddView(btnMDI, 5dip + (gridW + gSpace), r3Top, gridW, gridH_btn)
+	
+	btnJog.Initialize("Jog")
+	btnJog.Text = "Jog"
+	btnJog.Color = Colors.RGB(64, 64, 64)
+	btnJog.TextColor = Colors.White
+	btnJog.TextSize = 12
+	pnlRightMain.AddView(btnJog, 5dip + (gridW + gSpace) * 2, r3Top, gridW, gridH_btn)
+	
+	btnMore.Initialize("More")
+	btnMore.Text = "More"
+	btnMore.Color = Colors.RGB(64, 64, 64)
+	btnMore.TextColor = Colors.White
+	btnMore.TextSize = 12
+	pnlRightMain.AddView(btnMore, 5dip + (gridW + gSpace) * 3, r3Top, gridW, gridH_btn)
+	
+	' Initialize button states
+	ButtonStates.Put("Spindle CW", False)
+	ButtonStates.Put("Spindle Stop", True)
+	ButtonStates.Put("Spindle CCW", False)
+	ButtonStates.Put("Single Block", False)
+	ButtonStates.Put("Coolant", False)
+	ButtonStates.Put("GOTO Zero", False)
+	ButtonStates.Put("Override", False)
+	ButtonStates.Put("MDI", False)
+	ButtonStates.Put("Jog", False)
+	ButtonStates.Put("More", False)
+	
+	' Set Spindle Stop to ON color
+	btnSpindleStop.Color = Colors.RGB(212, 163, 89)
+	btnSpindleStop.TextColor = Colors.Black
+	
+	' ===== BOTTOM NAVIGATION =====
+	pnlBottomNav.Initialize("")
+	pnlBottomNav.Color = Colors.RGB(90, 90, 90)
+	Activity.AddView(pnlBottomNav, 0, 100%y - 45dip, 100%x, 45dip)
+	
+	Dim navW As Int = 100%x / 6
+	Dim navLabels() As String = Array As String("Home", "File", "Offsets", "Tools", "Probe", "Settings")
+	
+	For i = 0 To 5
+		btnNav(i).Initialize("Nav")
+		btnNav(i).Text = navLabels(i)
+		btnNav(i).TextColor = Colors.Black
+		btnNav(i).TextSize = 15
+		btnNav(i).Color = Colors.White
+		pnlBottomNav.AddView(btnNav(i), i * navW + 1dip, 2dip, navW - 2dip, 41dip)
+	Next
+	
+	' ===== INITIALIZE 3D VIEWER =====
+	Init3DViewer
+End Sub
+
+' ========== GRID BUTTON HANDLERS ==========
+Sub SpindleCW_Click
+	ToggleButton(btnSpindleCW, "Spindle CW")
+End Sub
+
+Sub SpindleStop_Click
+	ToggleButton(btnSpindleStop, "Spindle Stop")
+End Sub
+
+Sub SpindleCCW_Click
+	ToggleButton(btnSpindleCCW, "Spindle CCW")
+End Sub
+
+Sub SingleBlock_Click
+	ToggleButton(btnSingleBlock, "Single Block")
+End Sub
+
+Sub Coolant_Click
+	ToggleButton(btnCoolant, "Coolant")
+End Sub
+
+Sub GotoZero_Click
+	ToggleButton(btnGotoZero, "GOTO Zero")
+End Sub
+
+Sub Override_Click
+	ToggleButton(btnOverride, "Override")
+End Sub
+
+Sub MDI_Click
+	ToggleButton(btnMDI, "MDI")
+End Sub
+
+Sub Jog_Click
+	ToggleButton(btnJog, "Jog")
+End Sub
+
+Sub More_Click
+	ToggleButton(btnMore, "More")
+End Sub
+
+Sub ToggleButton(btn As Button, btnName As String)
+	Dim currentState As Boolean = ButtonStates.GetDefault(btnName, False)
+	Dim newState As Boolean = Not(currentState)
+	
+	ButtonStates.Put(btnName, newState)
+	
+	If newState Then
+		btn.Color = Colors.RGB(212, 163, 89)
+		btn.TextColor = Colors.Black
+	Else
+		btn.Color = Colors.RGB(64, 64, 64)
+		btn.TextColor = Colors.White
+	End If
+	
+	ToastMessageShow(btnName & " = " & IIf(newState, "ON", "OFF"), False)
+End Sub
+
+' ========== ACTION BUTTON HANDLERS ==========
+Sub Start_Click
+	If tmrBlink.Enabled Then
+		tmrBlink.Enabled = False
+		btnPause.Color = Colors.RGB(220, 53, 69)
+		btnPause.TextColor = Colors.White
+	End If
+	Msgbox("CNC Machine Starting!", "START")
+End Sub
+
+Sub Pause_Click
+	tmrBlink.Enabled = Not(tmrBlink.Enabled)
+	If tmrBlink.Enabled = False Then
+		btnPause.Color = Colors.RGB(220, 53, 69)
+		btnPause.TextColor = Colors.White
+	End If
+End Sub
+
+Sub Reset_Click
+	tmrBlink.Enabled = False
+	btnPause.Color = Colors.RGB(220, 53, 69)
+	btnPause.TextColor = Colors.White
+	
+	ButtonStates.Put("Spindle CW", False)
+	ButtonStates.Put("Spindle Stop", True)
+	ButtonStates.Put("Spindle CCW", False)
+	ButtonStates.Put("Single Block", False)
+	ButtonStates.Put("Coolant", False)
+	ButtonStates.Put("GOTO Zero", False)
+	ButtonStates.Put("Override", False)
+	ButtonStates.Put("MDI", False)
+	ButtonStates.Put("Jog", False)
+	ButtonStates.Put("More", False)
+	
+	btnSpindleCW.Color = Colors.RGB(64, 64, 64)
+	btnSpindleCW.TextColor = Colors.White
+	btnSpindleStop.Color = Colors.RGB(212, 163, 89)
+	btnSpindleStop.TextColor = Colors.Black
+	btnSpindleCCW.Color = Colors.RGB(64, 64, 64)
+	btnSpindleCCW.TextColor = Colors.White
+	btnSingleBlock.Color = Colors.RGB(64, 64, 64)
+	btnSingleBlock.TextColor = Colors.White
+	btnCoolant.Color = Colors.RGB(64, 64, 64)
+	btnCoolant.TextColor = Colors.White
+	btnGotoZero.Color = Colors.RGB(64, 64, 64)
+	btnGotoZero.TextColor = Colors.White
+	btnOverride.Color = Colors.RGB(64, 64, 64)
+	btnOverride.TextColor = Colors.White
+	btnMDI.Color = Colors.RGB(64, 64, 64)
+	btnMDI.TextColor = Colors.White
+	btnJog.Color = Colors.RGB(64, 64, 64)
+	btnJog.TextColor = Colors.White
+	btnMore.Color = Colors.RGB(64, 64, 64)
+	btnMore.TextColor = Colors.White
+	
+	Msgbox("System Reset", "RESET")
+End Sub
+
+' ========== AXIS HANDLER ==========
+Sub Axis_Click
+	Dim clickedBtn As Button = Sender
+	ToastMessageShow("Axis: " & clickedBtn.Text & " zeroed", False)
+End Sub
+
+' ========== NAVIGATION HANDLER ==========
+Sub Nav_Click
+	Dim clickedBtn As Button = Sender
+	
+	Select clickedBtn.Text
+		Case "File"
+			Open3DFile
+		Case "Settings"
+			StartActivity("SettingsScreen")
+		Case Else
+			ToastMessageShow("Navigation: " & clickedBtn.Text, False)
+	End Select
+End Sub
+
+' ========== BLINK TIMER ==========
+Sub tmrBlink_Tick
+	IsBlinkActiveState = Not(IsBlinkActiveState)
+	If IsBlinkActiveState Then
+		btnPause.Color = Colors.RGB(240, 200, 140)
+		btnPause.TextColor = Colors.Black
+	Else
+		btnPause.Color = Colors.RGB(220, 53, 69)
+		btnPause.TextColor = Colors.White
+	End If
+End Sub
+
+' ========== 3D G-CODE VIEWER ==========
+
+Sub Init3DViewer
+	viewerCanvas.Initialize(pnl3DPlaceholder)
+	viewerPoints.Initialize
+	viewerCC.Initialize("viewerCC")
+	Draw3DMessage
+End Sub
+
+Sub Draw3DMessage
+	viewerCanvas.ClearRect(viewerCanvas.TargetRect)
+	viewerCanvas.DrawText("Click 'File' to load G-Code", viewerCanvas.TargetRect.Width / 2, viewerCanvas.TargetRect.Height / 2, xui.CreateDefaultFont(16), Colors.Gray, "CENTER")
+	viewerCanvas.Invalidate
+End Sub
+
+Sub Open3DFile
+	viewerCC.Show("*/*", "Select G-Code File")
+End Sub
+
+Sub OLdviewerCC_Result (Success As Boolean, Dir As String, FileName As String)
+	If Success Then
+		Dim text As String = File.ReadString(Dir, FileName)
+		Parse3DFile(text)
+		Draw3DPath
+		ToastMessageShow("Loaded: " & FileName, False)
+	End If
+End Sub
+
+
+Sub viewerCC_Result (Success As Boolean, Dir As String, FileName As String)
+	If Success Then
+		Dim text As String = File.ReadString(Dir, FileName)
+		
+		' Display in G-Code terminal
+		txtGCodeDisplay.Text = text
+		
+		' Scroll to top
+		txtGCodeDisplay.SelectionStart = 0
+		
+		' Get the real filename - Dir contains the path, FileName is the actual name
+		Dim RealFileName As String = FileName
+		
+		' If Dir contains the full path, extract just the filename
+		If Dir.Length > 0 And FileName.Length > 0 Then
+			' FileName already contains just the name in most cases
+			RealFileName = FileName
+		End If
+		
+		' Show filename in title
+		lblTitle.Text = RealFileName
+		
+		' Status bar stays as "Ready"
+		lblStatus.Text = "Ready"
+		
+		' Show confirmation
+		ToastMessageShow("Loaded: " & RealFileName, True)
+		
+		' Parse and draw your 3D graphics
+		Parse3DFile(text)
+		Draw3DPath
+	End If
+End Sub
+
+
+
+Sub Parse3DFile(Text As String)
+	viewerPoints.Clear
+	Dim Lines() As String = Regex.Split(CRLF, Text)
+	Dim cx As Float = 0, cy As Float = 0, cz As Float = 0
+    
+	For Each line As String In Lines
+		Dim l As String = line.Trim.ToUpperCase
+		If l.StartsWith(";") Or l.StartsWith("(") Or l = "" Then Continue
+		If l.Contains("(") Then l = l.SubString2(0, l.IndexOf("(")).Trim
+        
+		If l.StartsWith("G0") Or l.StartsWith("G1") Then
+			Dim nx As Float = Get3DValue(l, "X", cx)
+			Dim ny As Float = Get3DValue(l, "Y", cy)
+			Dim nz As Float = Get3DValue(l, "Z", cz)
+			Dim cutting As Boolean = Not(l.StartsWith("G0"))
+            
+			Dim p As Map
+			p.Initialize
+			p.Put("x", nx)
+			p.Put("y", ny)
+			p.Put("z", nz)
+			p.Put("cut", cutting)
+			viewerPoints.Add(p)
+            
+			cx = nx : cy = ny : cz = nz
+		End If
+	Next
+	Calculate3DBounds
+End Sub
+
+Sub Get3DValue(line As String, letter As String, def As Float) As Float
+	Dim m As Matcher = Regex.Matcher(letter & "([-+]?[0-9]*\.?[0-9]+)", line)
+	If m.Find Then Return m.Group(1)
+	Return def
+End Sub
+
+Sub Calculate3DBounds
+	viewerMinX = 999999 : viewerMaxX = -999999
+	viewerMinY = 999999 : viewerMaxY = -999999
+	For Each p As Map In viewerPoints
+		Dim px As Float = Project3DX(p)
+		Dim py As Float = Project3DY(p)
+		If px < viewerMinX Then viewerMinX = px
+		If px > viewerMaxX Then viewerMaxX = px
+		If py < viewerMinY Then viewerMinY = py
+		If py > viewerMaxY Then viewerMaxY = py
+	Next
+End Sub
+
+Sub Project3DX(p As Map) As Float
+	Dim x As Float = p.Get("x")
+	Dim y As Float = p.Get("y")
+	Return x * Cos(viewerAngleZ) - y * Sin(viewerAngleZ)
+End Sub
+
+Sub Project3DY(p As Map) As Float
+	Dim x As Float = p.Get("x")
+	Dim y As Float = p.Get("y")
+	Dim z As Float = p.Get("z")
+	Dim ry As Float = x * Sin(viewerAngleZ) + y * Cos(viewerAngleZ)
+	Return ry * Cos(viewerAngleX) - z * Sin(viewerAngleX)
+End Sub
+
+Sub pnl3DPlaceholder_Touch(Action As Int, X As Float, Y As Float)
+	If Action = 0 Then
+		viewerStartX = X
+		viewerStartY = Y
+		viewerStartAngleX = viewerAngleX
+		viewerStartAngleZ = viewerAngleZ
+	Else If Action = 2 Then
+		viewerAngleZ = viewerStartAngleZ + (X - viewerStartX) * 0.007
+		viewerAngleX = viewerStartAngleX - (Y - viewerStartY) * 0.007
+		If viewerAngleX < 0.1 Then viewerAngleX = 0.1
+		If viewerAngleX > 1.5 Then viewerAngleX = 1.5
+		Calculate3DBounds
+		Draw3DPath
+	End If
+End Sub
+
+Sub Draw3DPath
+	viewerCanvas.ClearRect(viewerCanvas.TargetRect)
+    
+	If viewerPoints.Size < 2 Then
+		Draw3DMessage
+		Return
+	End If
+    
+	Dim w As Float = viewerMaxX - viewerMinX
+	Dim h As Float = viewerMaxY - viewerMinY
+	If w = 0 Then w = 1
+	If h = 0 Then h = 1
+    
+	Dim scale As Float = Min((viewerCanvas.TargetRect.Width * 0.7) / w, (viewerCanvas.TargetRect.Height * 0.7) / h)
+	Dim offX As Float = (viewerCanvas.TargetRect.Width - w * scale) / 2 - viewerMinX * scale
+	Dim offY As Float = (viewerCanvas.TargetRect.Height - h * scale) / 2 - viewerMinY * scale
+    
+	Dim prev As Map = viewerPoints.Get(0)
+	Dim prevX As Float = Project3DX(prev)
+	Dim prevY As Float = Project3DY(prev)
+    
+	For i = 1 To viewerPoints.Size - 1
+		Dim cur As Map = viewerPoints.Get(i)
+		Dim curX As Float = Project3DX(cur)
+		Dim curY As Float = Project3DY(cur)
+        
+		Dim x1 As Float = prevX * scale + offX
+		Dim y1 As Float = viewerCanvas.TargetRect.Height - (prevY * scale + offY)
+		Dim x2 As Float = curX * scale + offX
+		Dim y2 As Float = viewerCanvas.TargetRect.Height - (curY * scale + offY)
+        
+		Dim color As Int = Colors.RGB(100, 100, 100)
+		If cur.Get("cut") = True Then color = Colors.Cyan
+        
+		viewerCanvas.DrawLine(x1, y1, x2, y2, color, 1.5dip)
+        
+		prevX = curX
+		prevY = curY
+	Next
+    
+	viewerCanvas.Invalidate
+End Sub
+
+Sub Activity_Resume
+End Sub
+
+Sub Activity_Pause (UserClosed As Boolean)
+End Sub
