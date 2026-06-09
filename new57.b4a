@@ -1,19 +1,23 @@
 ﻿Build1=Default,cnc.controller2
+File1=main_layout.bal
+FileGroup1=Default Group
 Group=Default Group
 Library1=b4xpreferencesdialog
 Library2=core
 Library3=phone
 Library4=xui
-ManifestCode='This code will be applied to the manifest file during compilation.~\n~'You do not need to modify it in most cases.~\n~'See this link for for more information: https://www.b4x.com/forum/showthread.php?p=78136~\n~AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~'End of default text.~\n~
-Module1=SettingsScreen
-Module2=Starter
-NumberOfFiles=0
-NumberOfLibraries=4
-NumberOfModules=2
+Library5=javaobject
+ManifestCode='This code will be applied to the manifest file during compilation.~\n~'You do not need to modify it in most cases.~\n~'See this link for for more information: https://www.b4x.com/forum/showthread.php?p=78136~\n~AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="35"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~CreateResourceFromFile(Macro, Themes.LightTheme)~\n~'End of default text.~\n~AddActivityText(CNCExplorer, android:screenOrientation="landscape")~\n~AddPermission(android.permission.MANAGE_EXTERNAL_STORAGE)~\n~~\n~
+Module1=CNCExplorer
+Module2=SettingsScreen
+Module3=Starter
+NumberOfFiles=1
+NumberOfLibraries=5
+NumberOfModules=3
 Version=13.5
 @EndOfDesignText@
 #Region  Project Attributes 
-	#ApplicationLabel: CNC Controller2
+	#ApplicationLabel: CNC Controller3
 	#VersionCode: 1
 	#VersionName: 
 	'SupportedOrientations possible values: unspecified, landscape or portrait.
@@ -22,7 +26,7 @@ Version=13.5
 #End Region
 
 #Region  Activity Attributes 
-	#FullScreen: False
+	#FullScreen: True
 	#IncludeTitle: False
 #End Region
 
@@ -30,9 +34,12 @@ Sub Process_Globals
 	Private tmrBlink As Timer
 	Private xui As XUI
 	Private viewerCC As ContentChooser   ' ADD THIS LINE
+	' Add this line to hold the selected path string securely:
+	Public SelectedGCodePath As String = ""
 End Sub
 
 Sub Globals
+	
 	' Top bar
 	Private pnlTopBar As Panel
 	Private lblStatus, lblTitle, lblDateTime As Label
@@ -468,7 +475,12 @@ Sub Nav_Click
 	
 	Select clickedBtn.Text
 		Case "File"
-			Open3DFile
+			StartActivity(CNCExplorer)
+			' 2. ASSIGN IT DIRECTLY TO YOUR NEW57 APP VARIABLES
+			' This drops the string into a global tracking string variable in Main
+			'Main.SelectedGCodePath = PathToSend
+			lblTitle.Text = SelectedGCodePath  ' "TEST.nc"
+			'Open3DFile
 		Case "Settings"
 			StartActivity("SettingsScreen")
 		Case Else
@@ -676,6 +688,73 @@ Sub Draw3DPath
 End Sub
 
 Sub Activity_Resume
+	' Check if a file was selected while the explorer was open
+	If SelectedGCodePath <> "" Then
+		Log("CNC App received file path string: " & SelectedGCodePath)
+
+		Try
+			' 1. Check if it's a safe Content URI or a legacy path
+			Dim text As String = ""
+			If SelectedGCodePath.StartsWith("content://") Then
+				' Safe handling for modern Android URI strings
+				Dim ContentChooserFolder As String
+				Dim ContentChooserFile As String
+				' If you passed a direct stream URI, ContentChooser parsing tools can read it:
+				text = File.ReadString(SelectedGCodePath, "")
+			Else
+				' Fallback for legacy local paths / internal app storage paths
+				' Split path into Dir and FileName components safely
+				Dim LastSlash As Int = SelectedGCodePath.LastIndexOf("/")
+				If LastSlash > -1 Then
+					Dim FileDir As String = SelectedGCodePath.SubString2(0, LastSlash)
+					Dim FileName As String = SelectedGCodePath.SubString(LastSlash + 1)
+					text = File.ReadString(FileDir, FileName)
+				Else
+					text = File.ReadString(File.DirInternal, SelectedGCodePath)
+				End If
+			End If
+			
+			' 2. Display in G-Code terminal display layout
+			txtGCodeDisplay.Text = text
+			txtGCodeDisplay.SelectionStart = 0
+			
+			' 3. Extract just the filename to update the Title Bar
+			Dim RealFileName As String = SelectedGCodePath
+			If SelectedGCodePath.Contains("/") Then
+				RealFileName = SelectedGCodePath.SubString(SelectedGCodePath.LastIndexOf("/") + 1)
+			End If
+			lblTitle.Text = RealFileName
+			lblStatus.Text = "Ready"
+			
+			' 4. Core engine execution loops to update your 3D canvas
+			Parse3DFile(text)
+			Draw3DPath
+			
+			ToastMessageShow("Loaded: " & RealFileName, True)
+
+		Catch
+			Log("Error loading external path: " & LastException.Message)
+			ToastMessageShow("Error reading G-Code file data", True)
+			Draw3DMessage
+		End Try
+
+		' Clear the variable so it doesn't reload the file infinitely on device rotation
+		SelectedGCodePath = ""
+	End If
+End Sub
+
+Sub Activity_Resume_old
+	' Check if a file was selected while the explorer was open
+	If SelectedGCodePath <> "" Then
+		Log("CNC App received file path string: " & SelectedGCodePath)
+
+		' PASS the SelectedGCodePath string to your 3D engine routine here!
+		' Example: Draw3DCanvas(SelectedGCodePath)
+		
+
+		' Clear the variable so it doesn't reload the file infinitely
+		SelectedGCodePath = ""
+	End If
 End Sub
 
 Sub Activity_Pause (UserClosed As Boolean)
